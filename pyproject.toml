@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "mongotree"
+version = "0.1.0"
+description = "Tree Structure for MongoEngine"
+authors = ["Angonyfox <angonyfox@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.6"
+mongoengine = "^0.20.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+mongomock = "^3.19.0"
+
+[tool.poetry.urls]
+issues = "https://github.com/angonyfox/mongotree/issues"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
+
