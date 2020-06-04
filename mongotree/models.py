@@ -1,6 +1,8 @@
 import sys
+import operator
 
 import mongoengine as models
+from mongoengine.queryset.visitor import Q
 from mongotree.exceptions import InvalidPosition, MissingNodeOrderBy
 
 if sys.version_info >= (3, 0):
@@ -27,7 +29,7 @@ class Node(models.DynamicDocument):
         foreign_keys = {}
         for field, field_type in cls._fields.items():
             if isinstance(field_type, models.ReferenceField) and field != "parent":
-                foreign_keys[field] = field.document_type
+                foreign_keys[field] = field_type.document_type
         return foreign_keys
 
     @classmethod
@@ -124,8 +126,42 @@ class Node(models.DynamicDocument):
             return None
 
     @classmethod
+    def find_problems(cls):  # pragma: no cover
+        """Checks for problems in the tree structure."""
+        raise NotImplementedError
+
+    @classmethod
+    def fix_tree(cls):  # pragma: no cover
+        """
+        Solves problems that can appear when transactions are not used and
+        a piece of code breaks, leaving the tree in an inconsistent state.
+        """
+        raise NotImplementedError
+
+    @classmethod
     def get_tree(cls, parent=None):
         raise NotImplementedError
+
+    @classmethod
+    def get_descendants_group_count(cls, parent=None):
+        """
+        Helper for a very common case: get a group of siblings and the number
+        of *descendants* (not only children) in every sibling.
+        :param parent:
+            The parent of the siblings to return. If no parent is given, the
+            root nodes will be returned.
+        :returns:
+            A `list` (**NOT** a Queryset) of node objects with an extra
+            attribute: `descendants_count`.
+        """
+        if parent is None:
+            qset = cls.get_root_nodes()
+        else:
+            qset = parent.get_children()
+        nodes = list(qset)
+        for node in nodes:
+            node.descendants_count = node.get_descendant_count()
+        return nodes
 
     def get_depth(self):
         raise NotImplementedError
@@ -142,6 +178,10 @@ class Node(models.DynamicDocument):
     def get_descendants(self):
         raise NotImplementedError
 
+    def get_descendant_count(self):
+        """:returns: the number of descendants of a node."""
+        return self.get_descendants().count()
+
     def get_first_child(self):
         try:
             nodes = self.get_children()
@@ -155,6 +195,75 @@ class Node(models.DynamicDocument):
             return list(nodes)[-1]
         except IndexError:
             return None    
+
+    def get_first_sibling(self):
+        """
+        :returns:
+            The leftmost node's sibling, can return the node itself if
+            it was the leftmost sibling.
+        """
+        return list(self.get_siblings())[0]
+
+    def get_last_sibling(self):
+        """
+        :returns:
+            The rightmost node's sibling, can return the node itself if
+            it was the rightmost sibling.
+        """
+        return list(self.get_siblings())[-1]
+
+    def get_prev_sibling(self):
+        """
+        :returns:
+            The previous node's sibling, or None if it was the leftmost
+            sibling.
+        """
+        siblings = self.get_siblings()
+        ids = [obj.pk for obj in siblings]
+        if self.pk in ids:
+            idx = ids.index(self.pk)
+            if idx > 0:
+                return siblings[idx - 1]
+
+    def get_next_sibling(self):
+        """
+        :returns:
+            The next node's sibling, or None if it was the rightmost
+            sibling.
+        """
+        siblings = self.get_siblings()
+        ids = [obj.pk for obj in siblings]
+        if self.pk in ids:
+            idx = ids.index(self.pk)
+            if idx < len(siblings) - 1:
+                return siblings[idx + 1]
+
+    def is_sibling_of(self, node):
+        """
+        :returns: ``True`` if the node is a sibling of another node given as an
+            argument, else, returns ``False``
+        :param node:
+            The node that will be checked as a sibling
+        """
+        return self.get_siblings().filter(pk=node.pk).count() > 0
+
+    def is_child_of(self, node):
+        """
+        :returns: ``True`` if the node is a child of another node given as an
+            argument, else, returns ``False``
+        :param node:
+            The node that will be checked as a parent
+        """
+        return node.get_children().filter(pk=self.pk).count() > 0
+
+    def is_descendant_of(self, node):  # pragma: no cover
+        """
+        :returns: ``True`` if the node is a descendant of another node given
+            as an argument, else, returns ``False``
+        :param node:
+            The node that will be checked as an ancestor
+        """
+        raise NotImplementedError
 
     def add_child(self, **kwargs):
         raise NotImplementedError
@@ -209,6 +318,34 @@ class Node(models.DynamicDocument):
             'add_sibling',
             self._valid_pos_for_add_sibling,
             self._valid_pos_for_sorted_add_sibling)
+
+    _valid_pos_for_move = _valid_pos_for_add_sibling + (
+        'first-child', 'last-child', 'sorted-child')
+    _valid_pos_for_sorted_move = _valid_pos_for_sorted_add_sibling + (
+        'sorted-child',)
+
+    def _prepare_pos_var_for_move(self, pos):
+        return self._prepare_pos_var(
+            pos,
+            'move',
+            self._valid_pos_for_move,
+            self._valid_pos_for_sorted_move)
+
+    def get_sorted_pos_queryset(self, siblings, newobj):
+        """
+        :returns: A queryset of the nodes that must be moved
+        to the right. Called only for Node models with :attr:`node_order_by`
+        This function is based on _insertion_target_filters from django-mptt
+        (BSD licensed) by Jonathan Buchanan:
+        https://github.com/django-mptt/django-mptt/blob/0.3.0/mptt/signals.py
+        """
+
+        fields, filters = [], []
+        for field in self.node_order_by:
+            value = getattr(newobj, field)
+            filters.append(reduce(operator.and_, [Q(**{f: v}) for f, v in fields] + [Q(**{'%s__gt' % field: value})]))
+            fields.append((field, value))
+        return siblings.filter(reduce(operator.or_, filters))
 
     @classmethod
     def _get_serializable_model(cls):
