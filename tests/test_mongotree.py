@@ -57,10 +57,9 @@ def inherited_model(request):
 
 class TestTreeBase(object):
 
-    def setup_method(cls):
+    def setup_method(self):
         connect('mongoenginetest', host='mongomock://localhost')
 
-    def teardown_method(cls):
     def teardown_method(self):
         models.empty_models_tables(models.BASE_MODELS + models.SORTED_MODELS)
         disconnect()
@@ -80,7 +79,6 @@ class TestTreeBase(object):
                 assert sorted(got_edges) == good_edges
 
         return [(o.desc, o.get_depth(), o.get_children_count())
-                for o in model.get_tree().order_by('tree_id')]
                 for o in model.get_tree()]
 
 class TestEmptyTree(TestTreeBase):
@@ -93,7 +91,6 @@ class TestEmptyTree(TestTreeBase):
         assert sorted(got_descs) == sorted(expected_descs)
         assert self.got(model) == UNCHANGED
 
-    # def test_dump_bulk_empty(self, model):
     def test_dump_bulk_empty(self, model):
         assert model.dump_bulk() == []
 
