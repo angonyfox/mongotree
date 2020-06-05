@@ -13,7 +13,18 @@ from mongotree.models import Node
 from mongotree.exceptions import InvalidMoveToDescendant, NodeAlreadySaved
 
 def get_result_class(cls):
-    return cls
+    """
+    For the given model class, determine what class we should use for the
+    nodes returned by its tree methods (such as get_children).
+    Usually this will be trivially the same as the initial model class,
+    but there are special cases when model inheritance is in use:
+
+    """
+    if len(cls._superclasses) > 2:
+        return cls.__base__
+    else:
+        return cls
+
 class nested_set_query_set(QuerySet):
     def delete(self, removed_ranges=None):
         model = get_result_class(self._document)
@@ -39,6 +50,7 @@ class nested_set_query_set(QuerySet):
                 ranges.append((node.tree_id, node.lft, node.rgt))
             if toremove:
                 model.objects.filter(reduce(operator.or_, toremove)).delete(removed_ranges=ranges)
+
 class nested_set_manager(QuerySetManager):
     """Custom manager for nodes in a Nested Sets tree."""
     queryset_class = nested_set_query_set
@@ -47,6 +59,7 @@ class nested_set_manager(QuerySetManager):
     def get_queryset(doc_cls, queryset):
         """Sets the custom queryset as the default."""
         return queryset().order_by('tree_id', 'lft')
+
 class nested_set_tree(Node):
     node_order_by = []
 
@@ -62,6 +75,7 @@ class nested_set_tree(Node):
             'tree_id',
             'depth'
         ],
+        'abstract': True,
         'allow_inheritance': True
     }
 
